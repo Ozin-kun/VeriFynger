@@ -9,10 +9,107 @@ import sqlite3
 import base64
 import csv
 
+class RoundedButton(tk.Canvas):
+    """Custom rounded button"""
+    def __init__(self, parent, text, command=None, radius=10, padding=(20, 10), 
+                 bg_color='#9B7EDE', fg_color='white', hover_color='#8B6FD9', 
+                 font=('Segoe UI', 10, 'bold'), **kwargs):
+        tk.Canvas.__init__(self, parent, **kwargs)
+        self.command = command
+        self.bg_color = bg_color
+        self.hover_color = hover_color
+        self.fg_color = fg_color
+        self.text = text
+        self.font = font
+        self.radius = radius
+        self.padding = padding
+        
+        # Calculate size
+        temp_label = tk.Label(self, text=text, font=font)
+        temp_label.update_idletasks()
+        text_width = temp_label.winfo_reqwidth()
+        text_height = temp_label.winfo_reqheight()
+        temp_label.destroy()
+        
+        width = text_width + padding[0] * 2
+        height = text_height + padding[1] * 2
+        
+        self.config(width=width, height=height, highlightthickness=0, bg=parent['bg'])
+        
+        # Draw rounded rectangle
+        self.bg_rect = self._round_rectangle(0, 0, width, height, radius, fill=bg_color, outline='')
+        self.text_id = self.create_text(width/2, height/2, text=text, fill=fg_color, font=font)
+        
+        # Bind events
+        self.bind('<Button-1>', self._on_click)
+        self.bind('<Enter>', self._on_enter)
+        self.bind('<Leave>', self._on_leave)
+        self.config(cursor='hand2')
+    
+    def _round_rectangle(self, x1, y1, x2, y2, radius=25, **kwargs):
+        points = [x1+radius, y1,
+                  x1+radius, y1,
+                  x2-radius, y1,
+                  x2-radius, y1,
+                  x2, y1,
+                  x2, y1+radius,
+                  x2, y1+radius,
+                  x2, y2-radius,
+                  x2, y2-radius,
+                  x2, y2,
+                  x2-radius, y2,
+                  x2-radius, y2,
+                  x1+radius, y2,
+                  x1+radius, y2,
+                  x1, y2,
+                  x1, y2-radius,
+                  x1, y2-radius,
+                  x1, y1+radius,
+                  x1, y1+radius,
+                  x1, y1]
+        return self.create_polygon(points, smooth=True, **kwargs)
+    
+    def _on_click(self, event):
+        if self.command:
+            self.command()
+    
+    def _on_enter(self, event):
+        self.itemconfig(self.bg_rect, fill=self.hover_color)
+    
+    def _on_leave(self, event):
+        self.itemconfig(self.bg_rect, fill=self.bg_color)
+    
+    def config_text(self, text):
+        self.itemconfig(self.text_id, text=text)
+    
+    def config_color(self, bg_color):
+        self.bg_color = bg_color
+        self.itemconfig(self.bg_rect, fill=bg_color)
+
+class RoundedEntry(tk.Frame):
+    """Custom rounded entry"""
+    def __init__(self, parent, width=20, **kwargs):
+        tk.Frame.__init__(self, parent, bg=parent['bg'])
+        
+        self.entry = tk.Entry(self, width=width, font=('Segoe UI', 10),
+                             relief='flat', bd=0, bg='white', 
+                             highlightthickness=1, highlightbackground='#D0D0D0',
+                             highlightcolor='#9B7EDE', **kwargs)
+        self.entry.pack(padx=2, pady=2, ipady=6)
+    
+    def get(self):
+        return self.entry.get()
+    
+    def insert(self, index, string):
+        return self.entry.insert(index, string)
+    
+    def delete(self, first, last=None):
+        return self.entry.delete(first, last)
+
 class AttendanceApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("✨ VeriFynger - Sistem Presensi Fingerprint")
+        self.root.title("VeriFynger - Sistem Presensi Fingerprint")
         self.root.geometry("1200x800")
         self.root.resizable(True, True)
         
@@ -134,16 +231,18 @@ class AttendanceApp:
                        padding=8)
         
         # Configure TNotebook
-        style.configure('TNotebook', background=self.colors['bg_main'], borderwidth=0)
+        style.configure('TNotebook', background=self.colors['bg_main'], borderwidth=0, tabmargins=[0, 0, 0, 0])
         style.configure('TNotebook.Tab',
                        background=self.colors['secondary'],
                        foreground=self.colors['text_dark'],
-                       padding=[20, 10],
-                       font=('Segoe UI', 10, 'bold'))
+                       padding=[25, 12],
+                       font=('Segoe UI', 10, 'bold'),
+                       borderwidth=0,
+                       focuscolor='')
         style.map('TNotebook.Tab',
                  background=[('selected', self.colors['primary'])],
                  foreground=[('selected', self.colors['text_light'])],
-                 expand=[('selected', [1, 1, 1, 0])])
+                 padding=[('selected', [25, 12])])
         
         # Configure Treeview
         style.configure('Treeview',
@@ -285,37 +384,39 @@ class AttendanceApp:
                              font=('Segoe UI', 11, 'bold'))
         conn_label.grid(row=0, column=0, columnspan=6, sticky="w", padx=15, pady=(15, 10))
         
-        tk.Label(conn_frame, text="Broker Address:", bg=self.colors['bg_frame'], 
-                fg=self.colors['text_dark'], font=('Segoe UI', 9)).grid(row=1, column=0, padx=(15, 5), pady=10, sticky="w")
-        self.entry_broker = tk.Entry(conn_frame, width=25, font=('Segoe UI', 10), 
-                                     relief='solid', bd=1, bg='white')
-        self.entry_broker.grid(row=1, column=1, padx=5, pady=10)
+        # Input container untuk alignment yang lebih baik
+        input_frame = tk.Frame(conn_frame, bg=self.colors['bg_frame'])
+        input_frame.grid(row=1, column=0, columnspan=6, padx=15, pady=(5, 15))
+        
+        tk.Label(input_frame, text="Broker Address:", bg=self.colors['bg_frame'], 
+                fg=self.colors['text_dark'], font=('Segoe UI', 10)).pack(side="left", padx=(0, 8))
+        
+        self.entry_broker = RoundedEntry(input_frame, width=20)
+        self.entry_broker.pack(side="left", padx=(0, 15))
         self.entry_broker.insert(0, self.mqtt_broker)
         
-        tk.Label(conn_frame, text="Port:", bg=self.colors['bg_frame'],
-                fg=self.colors['text_dark'], font=('Segoe UI', 9)).grid(row=1, column=2, padx=(15, 5), pady=10, sticky="w")
-        self.entry_port = tk.Entry(conn_frame, width=10, font=('Segoe UI', 10),
-                                   relief='solid', bd=1, bg='white')
-        self.entry_port.grid(row=1, column=3, padx=5, pady=10)
+        tk.Label(input_frame, text="Port:", bg=self.colors['bg_frame'],
+                fg=self.colors['text_dark'], font=('Segoe UI', 10)).pack(side="left", padx=(0, 8))
+        
+        self.entry_port = RoundedEntry(input_frame, width=8)
+        self.entry_port.pack(side="left", padx=(0, 15))
         self.entry_port.insert(0, str(self.mqtt_port))
         
-        self.btn_connect = tk.Button(conn_frame, text="🔗 Connect", 
-                                     command=self.toggle_connection,
-                                     bg=self.colors['primary'],
-                                     fg=self.colors['text_light'],
-                                     font=('Segoe UI', 10, 'bold'),
-                                     relief='flat',
-                                     padx=20, pady=8,
-                                     cursor='hand2',
-                                     activebackground=self.colors['hover'],
-                                     activeforeground=self.colors['text_light'])
-        self.btn_connect.grid(row=1, column=4, padx=15, pady=10)
+        self.btn_connect = RoundedButton(input_frame, text="🔗 Connect",
+                                        command=self.toggle_connection,
+                                        bg_color=self.colors['primary'],
+                                        fg_color=self.colors['text_light'],
+                                        hover_color=self.colors['hover'],
+                                        font=('Segoe UI', 10, 'bold'),
+                                        padding=(25, 10),
+                                        radius=10)
+        self.btn_connect.pack(side="left", padx=(0, 15))
         
-        self.status_label = tk.Label(conn_frame, text="● Disconnected", 
+        self.status_label = tk.Label(input_frame, text="● Disconnected", 
                                      bg=self.colors['bg_frame'],
                                      foreground=self.colors['error'], 
-                                     font=('Segoe UI', 11, 'bold'))
-        self.status_label.grid(row=1, column=5, padx=15, pady=10)
+                                     font=('Segoe UI', 10, 'bold'))
+        self.status_label.pack(side="left", padx=(0, 5))
         
         # Notebook untuk tabs dengan styling
         notebook = ttk.Notebook(self.root)
@@ -355,13 +456,23 @@ class AttendanceApp:
             lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
         
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw", width=canvas.winfo_width())
         canvas.configure(yscrollcommand=scrollbar.set)
         
-        # Bind mouse wheel to canvas
+        # Bind canvas width to scrollable_frame width
+        def _on_canvas_configure(event):
+            canvas.itemconfig(canvas.find_withtag("all")[0], width=event.width)
+        canvas.bind("<Configure>", _on_canvas_configure)
+        
+        # Bind mouse wheel to canvas - only when mouse is over canvas
         def _on_mousewheel(event):
             canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        def _bind_mousewheel(event):
+            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        def _unbind_mousewheel(event):
+            canvas.unbind_all("<MouseWheel>")
+        canvas.bind("<Enter>", _bind_mousewheel)
+        canvas.bind("<Leave>", _unbind_mousewheel)
         
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
@@ -460,56 +571,48 @@ class AttendanceApp:
         tk.Label(form_frame, text="ID User (1-127):", 
                 bg=self.colors['bg_frame'], fg=self.colors['text_dark'],
                 font=('Segoe UI', 10)).grid(row=0, column=0, sticky="w", pady=12, padx=5)
-        self.entry_id = tk.Entry(form_frame, width=22, font=('Segoe UI', 10),
-                                relief='solid', bd=1, bg='white')
+        self.entry_id = RoundedEntry(form_frame, width=22)
         self.entry_id.grid(row=0, column=1, pady=12, padx=10, sticky="w")
         
         tk.Label(form_frame, text="Nama User:", 
                 bg=self.colors['bg_frame'], fg=self.colors['text_dark'],
                 font=('Segoe UI', 10)).grid(row=1, column=0, sticky="w", pady=12, padx=5)
-        self.entry_name = tk.Entry(form_frame, width=40, font=('Segoe UI', 10),
-                                   relief='solid', bd=1, bg='white')
+        self.entry_name = RoundedEntry(form_frame, width=40)
         self.entry_name.grid(row=1, column=1, pady=12, padx=10, sticky="w")
         
         tk.Label(form_frame, text="Email (opsional):", 
                 bg=self.colors['bg_frame'], fg=self.colors['text_dark'],
                 font=('Segoe UI', 10)).grid(row=2, column=0, sticky="w", pady=12, padx=5)
-        self.entry_email = tk.Entry(form_frame, width=40, font=('Segoe UI', 10),
-                                    relief='solid', bd=1, bg='white')
+        self.entry_email = RoundedEntry(form_frame, width=40)
         self.entry_email.grid(row=2, column=1, pady=12, padx=10, sticky="w")
         
         tk.Label(form_frame, text="Jabatan (opsional):", 
                 bg=self.colors['bg_frame'], fg=self.colors['text_dark'],
                 font=('Segoe UI', 10)).grid(row=3, column=0, sticky="w", pady=12, padx=5)
-        self.entry_position = tk.Entry(form_frame, width=40, font=('Segoe UI', 10),
-                                       relief='solid', bd=1, bg='white')
+        self.entry_position = RoundedEntry(form_frame, width=40)
         self.entry_position.grid(row=3, column=1, pady=12, padx=10, sticky="w")
         
         btn_frame = tk.Frame(register_frame, bg=self.colors['bg_frame'])
         btn_frame.pack(pady=20)
         
-        enroll_btn = tk.Button(btn_frame, text="🖐️ Daftarkan Fingerprint", 
-                              command=self.enroll_user,
-                              bg=self.colors['accent'],
-                              fg=self.colors['text_light'],
-                              font=('Segoe UI', 11, 'bold'),
-                              relief='flat',
-                              padx=25, pady=12,
-                              cursor='hand2',
-                              activebackground=self.colors['hover'],
-                              activeforeground=self.colors['text_light'])
+        enroll_btn = RoundedButton(btn_frame, text="🖐️ Daftarkan Fingerprint",
+                                   command=self.enroll_user,
+                                   bg_color=self.colors['accent'],
+                                   fg_color=self.colors['text_light'],
+                                   hover_color=self.colors['hover'],
+                                   font=('Segoe UI', 11, 'bold'),
+                                   padding=(30, 12),
+                                   radius=12)
         enroll_btn.pack(side="left", padx=8)
         
-        clear_btn = tk.Button(btn_frame, text="🗑️ Clear Form", 
-                             command=self.clear_form,
-                             bg=self.colors['secondary'],
-                             fg=self.colors['text_dark'],
-                             font=('Segoe UI', 10, 'bold'),
-                             relief='flat',
-                             padx=20, pady=12,
-                             cursor='hand2',
-                             activebackground=self.colors['primary'],
-                             activeforeground=self.colors['text_light'])
+        clear_btn = RoundedButton(btn_frame, text="🗑️ Clear Form",
+                                 command=self.clear_form,
+                                 bg_color=self.colors['secondary'],
+                                 fg_color=self.colors['text_dark'],
+                                 hover_color=self.colors['primary'],
+                                 font=('Segoe UI', 10, 'bold'),
+                                 padding=(25, 12),
+                                 radius=12)
         clear_btn.pack(side="left", padx=8)
         
         # Log area dengan card design
@@ -557,13 +660,23 @@ class AttendanceApp:
             lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
         
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw", width=canvas.winfo_width())
         canvas.configure(yscrollcommand=scrollbar_main.set)
         
-        # Bind mouse wheel to canvas
+        # Bind canvas width to scrollable_frame width
+        def _on_canvas_configure(event):
+            canvas.itemconfig(canvas.find_withtag("all")[0], width=event.width)
+        canvas.bind("<Configure>", _on_canvas_configure)
+        
+        # Bind mouse wheel to canvas - only when mouse is over canvas
         def _on_mousewheel(event):
             canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        def _bind_mousewheel(event):
+            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        def _unbind_mousewheel(event):
+            canvas.unbind_all("<MouseWheel>")
+        canvas.bind("<Enter>", _bind_mousewheel)
+        canvas.bind("<Leave>", _unbind_mousewheel)
         
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar_main.pack(side="right", fill="y")
@@ -584,49 +697,44 @@ class AttendanceApp:
         btn_container.pack(fill="both", expand=True, padx=15, pady=15)
         
         # Styled buttons
-        refresh_btn = tk.Button(btn_container, text="🔄 Refresh", 
-                               command=self.refresh_user_list,
-                               bg=self.colors['primary'],
-                               fg=self.colors['text_light'],
-                               font=('Segoe UI', 9, 'bold'),
-                               relief='flat',
-                               padx=15, pady=8,
-                               cursor='hand2',
-                               activebackground=self.colors['hover'])
+        refresh_btn = RoundedButton(btn_container, text="🔄 Refresh",
+                                   command=self.refresh_user_list,
+                                   bg_color=self.colors['primary'],
+                                   fg_color=self.colors['text_light'],
+                                   hover_color=self.colors['hover'],
+                                   font=('Segoe UI', 9, 'bold'),
+                                   padding=(18, 10),
+                                   radius=10)
         refresh_btn.pack(side="left", padx=5)
         
-        edit_btn = tk.Button(btn_container, text="✏️ Edit User", 
-                            command=self.edit_user,
-                            bg=self.colors['secondary'],
-                            fg=self.colors['text_dark'],
-                            font=('Segoe UI', 9, 'bold'),
-                            relief='flat',
-                            padx=15, pady=8,
-                            cursor='hand2',
-                            activebackground=self.colors['primary'],
-                            activeforeground=self.colors['text_light'])
+        edit_btn = RoundedButton(btn_container, text="✏️ Edit User",
+                                command=self.edit_user,
+                                bg_color=self.colors['secondary'],
+                                fg_color=self.colors['text_dark'],
+                                hover_color=self.colors['primary'],
+                                font=('Segoe UI', 9, 'bold'),
+                                padding=(18, 10),
+                                radius=10)
         edit_btn.pack(side="left", padx=5)
         
-        delete_btn = tk.Button(btn_container, text="🗑️ Hapus User", 
-                              command=self.delete_user,
-                              bg=self.colors['error'],
-                              fg=self.colors['text_light'],
-                              font=('Segoe UI', 9, 'bold'),
-                              relief='flat',
-                              padx=15, pady=8,
-                              cursor='hand2',
-                              activebackground='#E53935')
+        delete_btn = RoundedButton(btn_container, text="🗑️ Hapus User",
+                                  command=self.delete_user,
+                                  bg_color=self.colors['error'],
+                                  fg_color=self.colors['text_light'],
+                                  hover_color='#E53935',
+                                  font=('Segoe UI', 9, 'bold'),
+                                  padding=(18, 10),
+                                  radius=10)
         delete_btn.pack(side="left", padx=5)
         
-        export_btn = tk.Button(btn_container, text="📤 Export CSV", 
-                              command=self.export_users,
-                              bg=self.colors['success'],
-                              fg=self.colors['text_light'],
-                              font=('Segoe UI', 9, 'bold'),
-                              relief='flat',
-                              padx=15, pady=8,
-                              cursor='hand2',
-                              activebackground='#689F38')
+        export_btn = RoundedButton(btn_container, text="📤 Export CSV",
+                                  command=self.export_users,
+                                  bg_color=self.colors['success'],
+                                  fg_color=self.colors['text_light'],
+                                  hover_color='#689F38',
+                                  font=('Segoe UI', 9, 'bold'),
+                                  padding=(18, 10),
+                                  radius=10)
         export_btn.pack(side="left", padx=5)
         
         # Info label
@@ -711,13 +819,23 @@ class AttendanceApp:
             lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
         
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw", width=canvas.winfo_width())
         canvas.configure(yscrollcommand=scrollbar_main.set)
         
-        # Bind mouse wheel to canvas
+        # Bind canvas width to scrollable_frame width
+        def _on_canvas_configure(event):
+            canvas.itemconfig(canvas.find_withtag("all")[0], width=event.width)
+        canvas.bind("<Configure>", _on_canvas_configure)
+        
+        # Bind mouse wheel to canvas - only when mouse is over canvas
         def _on_mousewheel(event):
             canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        def _bind_mousewheel(event):
+            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        def _unbind_mousewheel(event):
+            canvas.unbind_all("<MouseWheel>")
+        canvas.bind("<Enter>", _bind_mousewheel)
+        canvas.bind("<Leave>", _unbind_mousewheel)
         
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar_main.pack(side="right", fill="y")
@@ -738,37 +856,34 @@ class AttendanceApp:
         btn_container.pack(fill="both", expand=True, padx=15, pady=15)
         
         # Buttons
-        refresh_btn = tk.Button(btn_container, text="🔄 Refresh", 
-                               command=self.refresh_attendance_logs,
-                               bg=self.colors['primary'],
-                               fg=self.colors['text_light'],
-                               font=('Segoe UI', 9, 'bold'),
-                               relief='flat',
-                               padx=15, pady=8,
-                               cursor='hand2',
-                               activebackground=self.colors['hover'])
+        refresh_btn = RoundedButton(btn_container, text="🔄 Refresh",
+                                   command=self.refresh_attendance_logs,
+                                   bg_color=self.colors['primary'],
+                                   fg_color=self.colors['text_light'],
+                                   hover_color=self.colors['hover'],
+                                   font=('Segoe UI', 9, 'bold'),
+                                   padding=(18, 10),
+                                   radius=10)
         refresh_btn.pack(side="left", padx=5)
         
-        clear_btn = tk.Button(btn_container, text="🗑️ Hapus Semua Log", 
-                             command=self.clear_logs,
-                             bg=self.colors['error'],
-                             fg=self.colors['text_light'],
-                             font=('Segoe UI', 9, 'bold'),
-                             relief='flat',
-                             padx=15, pady=8,
-                             cursor='hand2',
-                             activebackground='#E53935')
+        clear_btn = RoundedButton(btn_container, text="🗑️ Hapus Semua Log",
+                                 command=self.clear_logs,
+                                 bg_color=self.colors['error'],
+                                 fg_color=self.colors['text_light'],
+                                 hover_color='#E53935',
+                                 font=('Segoe UI', 9, 'bold'),
+                                 padding=(18, 10),
+                                 radius=10)
         clear_btn.pack(side="left", padx=5)
         
-        export_btn = tk.Button(btn_container, text="📤 Export CSV", 
-                              command=self.export_logs,
-                              bg=self.colors['success'],
-                              fg=self.colors['text_light'],
-                              font=('Segoe UI', 9, 'bold'),
-                              relief='flat',
-                              padx=15, pady=8,
-                              cursor='hand2',
-                              activebackground='#689F38')
+        export_btn = RoundedButton(btn_container, text="📤 Export CSV",
+                                  command=self.export_logs,
+                                  bg_color=self.colors['success'],
+                                  fg_color=self.colors['text_light'],
+                                  hover_color='#689F38',
+                                  font=('Segoe UI', 9, 'bold'),
+                                  padding=(18, 10),
+                                  radius=10)
         export_btn.pack(side="left", padx=5)
         
         # Filter section
@@ -777,21 +892,19 @@ class AttendanceApp:
                 font=('Segoe UI', 11)).pack(side="left", padx=(20, 5))
         
         self.filter_var = tk.StringVar()
-        self.filter_entry = tk.Entry(btn_container, textvariable=self.filter_var, 
-                                     width=25, font=('Segoe UI', 9),
-                                     relief='solid', bd=1, bg='white')
+        self.filter_entry = RoundedEntry(btn_container, width=25)
         self.filter_entry.pack(side="left", padx=5)
-        self.filter_entry.bind('<Return>', lambda e: self.filter_logs())
+        self.filter_entry.entry.config(textvariable=self.filter_var)
+        self.filter_entry.entry.bind('<Return>', lambda e: self.filter_logs())
         
-        search_btn = tk.Button(btn_container, text="Cari Nama", 
-                              command=self.filter_logs,
-                              bg=self.colors['accent'],
-                              fg=self.colors['text_light'],
-                              font=('Segoe UI', 9, 'bold'),
-                              relief='flat',
-                              padx=15, pady=8,
-                              cursor='hand2',
-                              activebackground=self.colors['hover'])
+        search_btn = RoundedButton(btn_container, text="Cari Nama",
+                                  command=self.filter_logs,
+                                  bg_color=self.colors['accent'],
+                                  fg_color=self.colors['text_light'],
+                                  hover_color=self.colors['hover'],
+                                  font=('Segoe UI', 9, 'bold'),
+                                  padding=(18, 10),
+                                  radius=10)
         search_btn.pack(side="left", padx=5)
         
         # Info label
@@ -865,27 +978,24 @@ class AttendanceApp:
         year_combo.pack(side="left", padx=5)
         
         # Tombol filter tanggal
-        filter_date_btn = tk.Button(date_filter_controls, text="🔍 Filter Tanggal", 
-                                    command=self.filter_logs_by_date,
-                                    bg=self.colors['success'],
-                                    fg=self.colors['text_light'],
-                                    font=('Segoe UI', 9, 'bold'),
-                                    relief='flat',
-                                    padx=15, pady=8,
-                                    cursor='hand2',
-                                    activebackground='#689F38')
+        filter_date_btn = RoundedButton(date_filter_controls, text="🔍 Filter Tanggal",
+                                        command=self.filter_logs_by_date,
+                                        bg_color=self.colors['success'],
+                                        fg_color=self.colors['text_light'],
+                                        hover_color='#689F38',
+                                        font=('Segoe UI', 9, 'bold'),
+                                        padding=(18, 10),
+                                        radius=10)
         filter_date_btn.pack(side="left", padx=10)
         
-        reset_filter_btn = tk.Button(date_filter_controls, text="↺ Reset", 
-                                     command=self.reset_date_filter,
-                                     bg=self.colors['secondary'],
-                                     fg=self.colors['text_dark'],
-                                     font=('Segoe UI', 9, 'bold'),
-                                     relief='flat',
-                                     padx=15, pady=8,
-                                     cursor='hand2',
-                                     activebackground=self.colors['primary'],
-                                     activeforeground=self.colors['text_light'])
+        reset_filter_btn = RoundedButton(date_filter_controls, text="↺ Reset",
+                                         command=self.reset_date_filter,
+                                         bg_color=self.colors['secondary'],
+                                         fg_color=self.colors['text_dark'],
+                                         hover_color=self.colors['primary'],
+                                         font=('Segoe UI', 9, 'bold'),
+                                         padding=(18, 10),
+                                         radius=10)
         reset_filter_btn.pack(side="left", padx=5)
         
         # Treeview untuk log dengan card design
@@ -958,13 +1068,23 @@ class AttendanceApp:
             lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
         )
         
-        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw", width=canvas.winfo_width())
         canvas.configure(yscrollcommand=scrollbar_main.set)
         
-        # Bind mouse wheel to canvas
+        # Bind canvas width to scrollable_frame width
+        def _on_canvas_configure(event):
+            canvas.itemconfig(canvas.find_withtag("all")[0], width=event.width)
+        canvas.bind("<Configure>", _on_canvas_configure)
+        
+        # Bind mouse wheel to canvas - only when mouse is over canvas
         def _on_mousewheel(event):
             canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        def _bind_mousewheel(event):
+            canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        def _unbind_mousewheel(event):
+            canvas.unbind_all("<MouseWheel>")
+        canvas.bind("<Enter>", _bind_mousewheel)
+        canvas.bind("<Leave>", _unbind_mousewheel)
         
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar_main.pack(side="right", fill="y")
@@ -1020,15 +1140,14 @@ Anda dapat melakukan restore jika sensor fingerprint direset atau template hilan
                 fg=self.colors['text_dark'],
                 font=('Segoe UI', 9)).pack(anchor="w", padx=20, pady=5)
         
-        backup_btn = tk.Button(backup_frame, text="📥 Backup Database", 
-                              command=self.backup_database,
-                              bg=self.colors['accent'],
-                              fg=self.colors['text_light'],
-                              font=('Segoe UI', 10, 'bold'),
-                              relief='flat',
-                              padx=20, pady=10,
-                              cursor='hand2',
-                              activebackground=self.colors['hover'])
+        backup_btn = RoundedButton(backup_frame, text="📥 Backup Database",
+                                  command=self.backup_database,
+                                  bg_color=self.colors['accent'],
+                                  fg_color=self.colors['text_light'],
+                                  hover_color=self.colors['hover'],
+                                  font=('Segoe UI', 10, 'bold'),
+                                  padding=(25, 12),
+                                  radius=12)
         backup_btn.pack(anchor="w", padx=20, pady=(5, 15))
         
         # Restore frame
@@ -1057,27 +1176,24 @@ Anda dapat melakukan restore jika sensor fingerprint direset atau template hilan
         restore_btn_frame = tk.Frame(restore_frame, bg=self.colors['bg_frame'])
         restore_btn_frame.pack(fill="x", padx=20, pady=(10, 15))
         
-        restore_all_btn = tk.Button(restore_btn_frame, text="♻️ Restore Semua User", 
-                                    command=self.restore_all_templates,
-                                    bg=self.colors['success'],
-                                    fg=self.colors['text_light'],
-                                    font=('Segoe UI', 10, 'bold'),
-                                    relief='flat',
-                                    padx=20, pady=10,
-                                    cursor='hand2',
-                                    activebackground='#689F38')
+        restore_all_btn = RoundedButton(restore_btn_frame, text="♻️ Restore Semua User",
+                                        command=self.restore_all_templates,
+                                        bg_color=self.colors['success'],
+                                        fg_color=self.colors['text_light'],
+                                        hover_color='#689F38',
+                                        font=('Segoe UI', 10, 'bold'),
+                                        padding=(25, 12),
+                                        radius=12)
         restore_all_btn.pack(side="left", padx=(0, 10))
         
-        restore_single_btn = tk.Button(restore_btn_frame, text="♻️ Restore User Tertentu", 
-                                       command=self.restore_single_template,
-                                       bg=self.colors['secondary'],
-                                       fg=self.colors['text_dark'],
-                                       font=('Segoe UI', 10, 'bold'),
-                                       relief='flat',
-                                       padx=20, pady=10,
-                                       cursor='hand2',
-                                       activebackground=self.colors['primary'],
-                                       activeforeground=self.colors['text_light'])
+        restore_single_btn = RoundedButton(restore_btn_frame, text="♻️ Restore User Tertentu",
+                                           command=self.restore_single_template,
+                                           bg_color=self.colors['secondary'],
+                                           fg_color=self.colors['text_dark'],
+                                           hover_color=self.colors['primary'],
+                                           font=('Segoe UI', 10, 'bold'),
+                                           padding=(25, 12),
+                                           radius=12)
         restore_single_btn.pack(side="left")
         
         # Status log
@@ -1145,7 +1261,8 @@ Anda dapat melakukan restore jika sensor fingerprint direset atau template hilan
         if rc == 0:
             self.is_connected = True
             self.status_label.config(text="● Connected", foreground=self.colors['success'])
-            self.btn_connect.config(text="🔌 Disconnect", bg=self.colors['error'])
+            self.btn_connect.config_text("🔌 Disconnect")
+            self.btn_connect.config_color(self.colors['error'])
             self.log(f"✅ Terhubung ke MQTT Broker: {self.mqtt_broker}:{self.mqtt_port}")
             
             # Subscribe ke topics
@@ -1165,7 +1282,8 @@ Anda dapat melakukan restore jika sensor fingerprint direset atau template hilan
         """Callback saat disconnect dari MQTT"""
         self.is_connected = False
         self.status_label.config(text="● Disconnected", foreground=self.colors['error'])
-        self.btn_connect.config(text="🔗 Connect", bg=self.colors['primary'])
+        self.btn_connect.config_text("🔗 Connect")
+        self.btn_connect.config_color(self.colors['primary'])
         self.log("⚠️ Terputus dari MQTT Broker")
     
     def disconnect_mqtt(self):

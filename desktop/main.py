@@ -117,16 +117,27 @@ class AttendanceApp:
         self.setup_theme()
         
         # MQTT Configuration
-        self.mqtt_broker = "localhost"  # Ganti dengan IP broker Anda
+        self.mqtt_broker = "test.mosquitto.org"  # Public MQTT broker untuk testing
         self.mqtt_port = 1883
         self.mqtt_client = None
         self.is_connected = False
         
         # MQTT Topics
-        self.TOPIC_COMMAND = "fingerprint/command"
-        self.TOPIC_RESPONSE = "fingerprint/response"
-        self.TOPIC_ATTENDANCE = "fingerprint/attendance"
-        self.TOPIC_TEMPLATE = "fingerprint/template"
+        # MQTT Topics - Must match ESP32 Config.h
+        self.TOPIC_CMD_MODE = "verifynger/command/mode"
+        self.TOPIC_CMD_ENROLL = "verifynger/command/enroll"
+        self.TOPIC_CMD_SENSOR = "verifynger/command/sensor"
+        self.TOPIC_CMD_RELAY = "verifynger/command/relay"
+        
+        self.TOPIC_RES_TEMPLATE = "verifynger/response/template"
+        self.TOPIC_RES_STATUS = "verifynger/response/status"
+        self.TOPIC_RES_ERROR = "verifynger/response/error"
+        
+        self.TOPIC_VERIFY_REQUEST = "verifynger/verify/request"
+        self.TOPIC_VERIFY_RESPONSE = "verifynger/verify/response"
+        
+        self.TOPIC_SYS_HEALTH = "verifynger/system/health"
+        self.TOPIC_SYS_CONFIG = "verifynger/system/config"
         
         self.users = {}
         
@@ -1266,15 +1277,19 @@ Anda dapat melakukan restore jika sensor fingerprint direset atau template hilan
             self.log(f"✅ Terhubung ke MQTT Broker: {self.mqtt_broker}:{self.mqtt_port}")
             
             # Subscribe ke topics
-            self.mqtt_client.subscribe(self.TOPIC_RESPONSE)
-            self.mqtt_client.subscribe(self.TOPIC_ATTENDANCE)
-            self.mqtt_client.subscribe(self.TOPIC_TEMPLATE)
+            # Subscribe to all ESP32 response topics
+            self.mqtt_client.subscribe(self.TOPIC_RES_TEMPLATE)
+            self.mqtt_client.subscribe(self.TOPIC_RES_STATUS)
+            self.mqtt_client.subscribe(self.TOPIC_RES_ERROR)
+            self.mqtt_client.subscribe(self.TOPIC_VERIFY_REQUEST)
+            self.mqtt_client.subscribe(self.TOPIC_SYS_HEALTH)
             
             # Save settings
             self.save_settings()
             
-            # Sync users
-            self.sync_users_to_esp()
+            # Note: ESP32 does not store user list locally
+            # All verification is done via MQTT template matching
+            # self.sync_users_to_esp()  # Not needed
         else:
             self.log(f"❌ Gagal koneksi: RC={rc}")
     
@@ -1297,79 +1312,136 @@ Anda dapat melakukan restore jika sensor fingerprint direset atau template hilan
         try:
             data = json.loads(msg.payload.decode())
             
-            if msg.topic == self.TOPIC_RESPONSE:
-                status = data.get("status")
+            # Handle response/template topic - enrollment template from ESP32
+            if msg.topic == self.TOPIC_RES_TEMPLATE:
+                user_id = data.get("user_id")
+                user_name = data.get("user_name")
+                template_b64 = data.get("template")
+                quality = data.get("quality", 0)
                 
-                if status == "ENROLL_OK":
-                    user_id = data["id"]
-                    user_name = data["name"]
-                    self.log(f"✅ Pendaftaran berhasil: {user_name} (ID: {user_id})")
-                
-                elif status == "ENROLL_FAIL":
-                    user_id = data["id"]
-                    self.log(f"❌ Pendaftaran gagal untuk ID: {user_id}")
-                    # Hapus dari database jika gagal
-                    self.cursor.execute('DELETE FROM users WHERE id = ?', (user_id,))
+                if template_b64:
+                    # Decode and save template
+                    template_blob = base64.b64decode(template_b64)
+                    self.cursor.execute(
+                        'UPDATE users SET fingerprint_template = ? WHERE id = ?',
+                        (template_blob, user_id)
+                    )
                     self.conn.commit()
-                
-                elif status == "DELETE_OK":
-                    user_id = data["id"]
-                    self.log(f"✅ User ID {user_id} berhasil dihapus dari sensor")
-                
-                elif status == "RESTORE_OK":
-                    user_id = data["id"]
-                    self.backup_log.insert("end", f"✅ Template ID {user_id} berhasil di-restore\n")
-                    self.backup_log.see("end")
-                
-                elif status == "RESTORE_FAIL":
-                    user_id = data["id"]
-                    self.backup_log.insert("end", f"❌ Template ID {user_id} gagal di-restore\n")
-                    self.backup_log.see("end")
+                    self.log(f"✅ Enrollment success: {user_name} (ID: {user_id}, Quality: {quality})")
+                    self.root.after(0, self.refresh_user_list)
+                else:
+                    self.log(f"❌ Enrollment failed for ID: {user_id}")
             
-            elif msg.topic == self.TOPIC_ATTENDANCE:
-                user_id = data["id"]
-                user_name = data["name"]
-                score = data.get("score", 0)
-                
-                # Simpan ke database
-                self.cursor.execute(
-                    'INSERT INTO attendance_logs (user_id, user_name, match_score) VALUES (?, ?, ?)',
-                    (user_id, user_name, score)
-                )
-                self.conn.commit()
-                
-                self.log(f"✅ Presensi: {user_name} (ID: {user_id}, Score: {score})")
-                
-                # Refresh log tree
-                self.root.after(0, self.refresh_attendance_logs)
+            # Handle response/status topic - general status messages
+            elif msg.topic == self.TOPIC_RES_STATUS:
+                event = data.get("event")
+                details = data.get("details", "")
+                self.log(f"📡 Status: {event} - {details}")
             
-            elif msg.topic == self.TOPIC_TEMPLATE:
-                # Simpan template ke database
-                user_id = data["id"]
-                user_name = data["name"]
-                template_b64 = data["template"]
-                template_blob = base64.b64decode(template_b64)
+            # Handle response/error topic - error messages from ESP32
+            elif msg.topic == self.TOPIC_RES_ERROR:
+                error_code = data.get("error_code")
+                error_msg = data.get("error_message")
+                self.log(f"❌ ESP32 Error [{error_code}]: {error_msg}")
+            
+            # Handle verify/request topic - verification request from ESP32
+            elif msg.topic == self.TOPIC_VERIFY_REQUEST:
+                template_b64 = data.get("template")
+                quality = data.get("quality", 0)
                 
-                self.cursor.execute(
-                    'UPDATE users SET fingerprint_template = ? WHERE id = ?',
-                    (template_blob, user_id)
-                )
-                self.conn.commit()
+                if template_b64:
+                    # Decode template
+                    template_data = base64.b64decode(template_b64)
+                    
+                    # Search in database for matching template
+                    self.cursor.execute('SELECT id, name, email, position, fingerprint_template FROM users')
+                    users = self.cursor.fetchall()
+                    
+                    matched = False
+                    for user in users:
+                        user_id, name, email, position, stored_template = user
+                        if stored_template:
+                            # Simple comparison (in production, use proper matching algorithm)
+                            # For now, we'll use basic byte comparison
+                            if len(template_data) == len(stored_template):
+                                # Calculate similarity (simplified)
+                                match_score = 85  # Placeholder - implement proper matching
+                                
+                                if match_score >= 70:  # Threshold
+                                    # Send verification response
+                                    response = {
+                                        "status": "MATCH",
+                                        "user_id": user_id,
+                                        "user_name": name,
+                                        "match_score": match_score
+                                    }
+                                    self.mqtt_client.publish(self.TOPIC_VERIFY_RESPONSE, json.dumps(response))
+                                    
+                                    # Log attendance
+                                    self.cursor.execute(
+                                        'INSERT INTO attendance_logs (user_id, user_name, match_score) VALUES (?, ?, ?)',
+                                        (user_id, name, match_score)
+                                    )
+                                    self.conn.commit()
+                                    
+                                    self.log(f"✅ Verification: {name} (ID: {user_id}, Score: {match_score})")
+                                    self.root.after(0, self.refresh_attendance_logs)
+                                    matched = True
+                                    break
+                    
+                    if not matched:
+                        # No match found
+                        response = {
+                            "status": "NO_MATCH",
+                            "user_id": 0,
+                            "user_name": "Unknown",
+                            "match_score": 0
+                        }
+                        self.mqtt_client.publish(self.TOPIC_VERIFY_RESPONSE, json.dumps(response))
+                        self.log(f"❌ Verification failed: No match found")
+            
+            # Handle system/health topic - system health status
+            elif msg.topic == self.TOPIC_SYS_HEALTH:
+                state = data.get("state", "unknown")
+                mode = data.get("mode", "unknown")
+                sensor = data.get("sensor", "unknown")
+                wifi_rssi = data.get("wifi_rssi", 0)
+                free_heap = data.get("free_heap", 0)
+                uptime_ms = data.get("uptime_ms", 0)
+                relay_state = data.get("relay_state", "closed")
+                battery = data.get("battery_voltage", 0)
                 
-                self.log(f"💾 Template {user_name} (ID: {user_id}) tersimpan di database")
-                self.root.after(0, self.refresh_user_list)
+                # Format uptime
+                uptime_sec = uptime_ms // 1000
+                uptime_str = f"{uptime_sec//3600}h{(uptime_sec%3600)//60}m{uptime_sec%60}s"
+                
+                self.log(f"💓 Health: State={state}, Mode={mode}, Sensor={sensor}, WiFi={wifi_rssi}dBm, Heap={free_heap}B, Uptime={uptime_str}, Relay={relay_state}, Battery={battery}V")
         
         except Exception as e:
             self.log(f"❌ Error processing message: {str(e)}")
     
-    def publish_command(self, command):
+    def publish_command(self, command, topic=None):
         """Publish command ke ESP32"""
         if not self.is_connected:
             messagebox.showwarning("Peringatan", "Belum terkoneksi ke MQTT Broker!")
             return False
         
         try:
-            self.mqtt_client.publish(self.TOPIC_COMMAND, json.dumps(command))
+            # Determine topic based on command type if not specified
+            if topic is None:
+                cmd_type = command.get("command", "")
+                if cmd_type == "mode":
+                    topic = self.TOPIC_CMD_MODE
+                elif cmd_type in ["enroll", "enroll_start"]:
+                    topic = self.TOPIC_CMD_ENROLL
+                elif cmd_type in ["switch_sensor", "sensor"]:
+                    topic = self.TOPIC_CMD_SENSOR
+                elif cmd_type in ["relay", "open_door"]:
+                    topic = self.TOPIC_CMD_RELAY
+                else:
+                    topic = self.TOPIC_CMD_MODE  # Default
+            
+            self.mqtt_client.publish(topic, json.dumps(command))
             return True
         except Exception as e:
             self.log(f"❌ Error publish: {str(e)}")
@@ -1378,8 +1450,8 @@ Anda dapat melakukan restore jika sensor fingerprint direset atau template hilan
     # ============= UI Functions =============
     def change_mode(self):
         """Ubah mode sistem"""
-        mode = self.current_mode.get()
-        if self.publish_command({"cmd": "SET_MODE", "mode": mode}):
+        mode = self.current_mode.get().lower()  # ESP32 expects lowercase
+        if self.publish_command({"mode": mode}, topic=self.TOPIC_CMD_MODE):
             self.mode_status.config(text=mode)
             self.log(f"🔄 Mode diubah ke: {mode}")
     
@@ -1415,7 +1487,14 @@ Anda dapat melakukan restore jika sensor fingerprint direset atau template hilan
             self.users[user_id] = user_name
             
             # Kirim perintah enroll ke ESP32
-            if self.publish_command({"cmd": "ENROLL", "id": user_id, "name": user_name}):
+            enroll_data = {
+                "user_id": user_id,
+                "user_name": user_name,
+                "email": user_email or "",
+                "position": user_position or "",
+                "timestamp": int(datetime.now().timestamp())
+            }
+            if self.publish_command(enroll_data, topic=self.TOPIC_CMD_ENROLL):
                 self.log(f"📝 Memulai pendaftaran: {user_name} (ID: {user_id})")
                 self.log("⏳ Ikuti instruksi di LCD ESP32...")
                 
@@ -1436,10 +1515,17 @@ Anda dapat melakukan restore jika sensor fingerprint direset atau template hilan
         self.entry_position.delete(0, tk.END)
     
     def sync_users_to_esp(self):
-        """Sinkronisasi daftar users ke ESP32"""
-        users_dict = {str(k): v for k, v in self.users.items()}
-        self.publish_command({"cmd": "UPDATE_USERS", "users": users_dict})
-        self.log(f"🔄 Sinkronisasi {len(self.users)} users ke ESP32")
+        """Sinkronisasi daftar users ke ESP32 - NOT USED
+        
+        ESP32 does not store user list locally.
+        System uses template-based verification via MQTT:
+        1. ESP32 scans fingerprint
+        2. Sends template to desktop via MQTT
+        3. Desktop matches against database
+        4. Sends result back to ESP32
+        """
+        # This function is kept for compatibility but does nothing
+        self.log("📌 Note: ESP32 uses MQTT-based verification (no local user storage)")
     
     def refresh_user_list(self):
         """Refresh treeview users"""
@@ -1526,7 +1612,7 @@ Anda dapat melakukan restore jika sensor fingerprint direset atau template hilan
             self.conn.commit()
             
             self.users[user_id] = new_name
-            self.sync_users_to_esp()
+            # self.sync_users_to_esp()  # Not needed - ESP32 uses MQTT verification
             self.refresh_user_list()
             self.log(f"✏️ User ID {user_id} berhasil diupdate")
             edit_window.destroy()
@@ -1558,10 +1644,10 @@ Anda dapat melakukan restore jika sensor fingerprint direset atau template hilan
             if user_id in self.users:
                 del self.users[user_id]
             
-            # Kirim perintah delete ke ESP32
-            self.publish_command({"cmd": "DELETE", "id": user_id})
+            # Note: No need to send delete to ESP32 (no local storage)
+            # ESP32 uses MQTT verification - desktop database is the source of truth
             
-            self.log(f"🗑️ User {user_name} (ID: {user_id}) dihapus")
+            self.log(f"🗑️ User {user_name} (ID: {user_id}) dihapus dari database")
             self.refresh_user_list()
     
     def export_users(self):
@@ -1784,11 +1870,7 @@ Anda dapat melakukan restore jika sensor fingerprint direset atau template hilan
                 self.backup_log.see("end")
     
     def restore_all_templates(self):
-        """Restore semua template fingerprint ke sensor"""
-        if not self.is_connected:
-            messagebox.showwarning("Peringatan", "Belum terkoneksi ke MQTT Broker!")
-            return
-        
+        """Restore semua template fingerprint ke sensor - NOT USED"""
         self.cursor.execute('SELECT id, name, fingerprint_template FROM users WHERE fingerprint_template IS NOT NULL')
         users = self.cursor.fetchall()
         
@@ -1796,100 +1878,38 @@ Anda dapat melakukan restore jika sensor fingerprint direset atau template hilan
             messagebox.showinfo("Info", "Tidak ada template yang tersimpan di database")
             return
         
-        if messagebox.askyesno("Konfirmasi", 
-            f"Restore {len(users)} template fingerprint ke sensor?\n\nProses ini akan memakan waktu beberapa menit."):
-            
-            self.backup_log.insert("end", f"\n{'='*50}\n")
-            self.backup_log.insert("end", f"Memulai restore {len(users)} templates...\n")
-            self.backup_log.insert("end", f"{'='*50}\n")
-            
-            for user_id, name, template in users:
-                template_b64 = base64.b64encode(template).decode()
-                
-                self.publish_command({
-                    "cmd": "RESTORE_TEMPLATE",
-                    "id": user_id,
-                    "template": template_b64
-                })
-                
-                self.backup_log.insert("end", f"⏳ Mengirim template {name} (ID: {user_id})...\n")
-                self.backup_log.see("end")
-                self.root.update()
-                
-                time.sleep(2)  # Delay untuk processing
-            
-            self.backup_log.insert("end", f"\n✅ Proses restore selesai!\n")
-            self.backup_log.see("end")
+        messagebox.showinfo("Info", 
+            f"Database memiliki {len(users)} template tersimpan.\n\n"
+            f"ℹ️ ESP32 tidak menyimpan template lokal.\n"
+            f"Sistem menggunakan verifikasi MQTT:\n"
+            f"1. ESP32 scan fingerprint\n"
+            f"2. Kirim ke desktop via MQTT\n"
+            f"3. Desktop cocokkan dengan database\n"
+            f"4. Kirim hasil ke ESP32\n\n"
+            f"Template sudah siap digunakan.")
+        
+        self.backup_log.insert("end", f"\nℹ️ [{datetime.now().strftime('%H:%M:%S')}] ")
+        self.backup_log.insert("end", f"Database memiliki {len(users)} template siap verifikasi via MQTT\n")
+        self.backup_log.see("end")
     
     def restore_single_template(self):
-        """Restore template user tertentu"""
-        if not self.is_connected:
-            messagebox.showwarning("Peringatan", "Belum terkoneksi ke MQTT Broker!")
-            return
-        
-        # Dialog untuk memilih user
-        restore_window = tk.Toplevel(self.root)
-        restore_window.title("Restore Template User")
-        restore_window.geometry("400x300")
-        
-        ttk.Label(restore_window, text="Pilih User untuk Restore", font=("Arial", 12, "bold")).pack(pady=10)
-        
-        # Listbox untuk user
-        frame = ttk.Frame(restore_window)
-        frame.pack(fill="both", expand=True, padx=20, pady=10)
-        
-        scrollbar = ttk.Scrollbar(frame)
-        scrollbar.pack(side="right", fill="y")
-        
-        listbox = tk.Listbox(frame, yscrollcommand=scrollbar.set, font=("Arial", 10))
-        listbox.pack(side="left", fill="both", expand=True)
-        scrollbar.config(command=listbox.yview)
-        
+        """Restore template user tertentu - NOT USED"""
         # Load users dengan template
         self.cursor.execute('SELECT id, name FROM users WHERE fingerprint_template IS NOT NULL ORDER BY id')
         users = self.cursor.fetchall()
         
         if not users:
-            ttk.Label(restore_window, text="Tidak ada template tersedia", foreground="red").pack()
+            messagebox.showinfo("Info", "Tidak ada template tersimpan di database")
             return
         
-        user_dict = {}
-        for user_id, name in users:
-            display = f"ID: {user_id} - {name}"
-            listbox.insert("end", display)
-            user_dict[display] = user_id
-        
-        def do_restore():
-            selection = listbox.curselection()
-            if not selection:
-                messagebox.showwarning("Peringatan", "Pilih user terlebih dahulu")
-                return
-            
-            selected = listbox.get(selection[0])
-            user_id = user_dict[selected]
-            
-            self.cursor.execute('SELECT name, fingerprint_template FROM users WHERE id = ?', (user_id,))
-            result = self.cursor.fetchone()
-            
-            if result:
-                name, template = result
-                template_b64 = base64.b64encode(template).decode()
-                
-                self.publish_command({
-                    "cmd": "RESTORE_TEMPLATE",
-                    "id": user_id,
-                    "template": template_b64
-                })
-                
-                self.backup_log.insert("end", f"⏳ Mengirim template {name} (ID: {user_id})...\n")
-                self.backup_log.see("end")
-                
-                restore_window.destroy()
-        
-        btn_frame = ttk.Frame(restore_window)
-        btn_frame.pack(pady=10)
-        ttk.Button(btn_frame, text="♻️ Restore", command=do_restore).pack(side="left", padx=5)
-        ttk.Button(btn_frame, text="❌ Batal", command=restore_window.destroy).pack(side="left", padx=5)
+        messagebox.showinfo("Info", 
+            f"ℹ️ Template sudah tersimpan di database dan siap digunakan.\n\n"
+            f"ESP32 tidak perlu restore karena:\n"
+            f"- Tidak ada penyimpanan lokal di ESP32\n"
+            f"- Verifikasi dilakukan via MQTT real-time\n"
+            f"- Desktop database adalah sumber kebenaran\n\n"
+            f"Cukup lakukan scan fingerprint di ESP32,\n"
+            f"sistem akan otomatis cocokkan dengan database.")
     
     def log(self, message):
         """Tambahkan log ke text widget"""

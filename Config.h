@@ -26,7 +26,7 @@
 #define WIFI_TIMEOUT 10000 // 10 seconds
 #define WIFI_RETRY_MAX 5
 
-#define MQTT_BROKER "test.mosquitto.org"
+#define MQTT_BROKER "broker.emqx.io" //"test.mosquitto.org"
 #define MQTT_PORT 1883
 #define MQTT_CLIENT_ID "verifynger_esp32"
 #define MQTT_USERNAME ""  // Optional
@@ -53,8 +53,8 @@
 #define TOPIC_VERIFY_RESPONSE "verifynger/verify/response" // Response dari Desktop
 
 // System Health
-#define TOPIC_SYS_HEALTH "verifynger/system/health" // Health check ESP32
-#define TOPIC_SYS_CONFIG "verifynger/system/config" // Config update
+#define TOPIC_SYS_HEALTH "verifynger/system/health"      // Health check ESP32
+#define TOPIC_SYS_CONFIG "verifynger/system/config"      // Config update
 #define TOPIC_SENSOR_METRICS "verifynger/sensor/metrics" // Sensor metrics data
 
 // ============================================================================
@@ -244,9 +244,9 @@ enum ErrorCode
 // ============================================================================
 #define ARRAY_SIZE(arr) (sizeof(arr) / sizeof(arr[0]))
 
-// Relay control macros
-#define RELAY_ON() digitalWrite(RELAY_PIN, RELAY_ACTIVE_HIGH ? HIGH : LOW)
-#define RELAY_OFF() digitalWrite(RELAY_PIN, RELAY_ACTIVE_HIGH ? LOW : HIGH)
+// Relay control macros (FIXED: Logic terbalik - relay aktif saat LOW)
+#define RELAY_ON() digitalWrite(RELAY_PIN, RELAY_ACTIVE_HIGH ? LOW : HIGH)
+#define RELAY_OFF() digitalWrite(RELAY_PIN, RELAY_ACTIVE_HIGH ? HIGH : LOW)
 
 // LED control macros
 #define LED_ON(pin) digitalWrite(pin, HIGH)

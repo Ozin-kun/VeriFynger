@@ -79,12 +79,13 @@ bool wifiConnected = false;
 bool mqttConnected = false;
 
 // Sensor Metrics Tracking
-struct SensorMetrics {
+struct SensorMetrics
+{
     unsigned long totalScans;
     unsigned long successCount;
     unsigned long failCount;
-    unsigned long totalResponseTime;  // Total waktu untuk menghitung rata-rata
-    unsigned long scanCount;  // Jumlah scan untuk menghitung rata-rata
+    unsigned long totalResponseTime; // Total waktu untuk menghitung rata-rata
+    unsigned long scanCount;         // Jumlah scan untuk menghitung rata-rata
     float avgConfidence;
     unsigned long lastScanTime;
 } sensorMetrics[SENSOR_COUNT];
@@ -167,9 +168,10 @@ void setup()
     // Initialize enrollment data
     enrollData.isEnrolling = false;
     enrollData.enrollStep = 0;
-    
+
     // Initialize sensor metrics
-    for (int i = 0; i < SENSOR_COUNT; i++) {
+    for (int i = 0; i < SENSOR_COUNT; i++)
+    {
         sensorMetrics[i].totalScans = 0;
         sensorMetrics[i].successCount = 0;
         sensorMetrics[i].failCount = 0;
@@ -582,7 +584,7 @@ void handleSensors()
         else if (result == -1)
         {
             // No match found
-            displayError("No Match!");
+            displayLCD("FAILED", "No Match!", 2000);
 
             DEBUG_PRINTLN("❌ Fingerprint tidak dikenali");
 
@@ -972,7 +974,7 @@ int scanFingerprint()
         if (p == FINGERPRINT_OK)
         {
             DEBUG_PRINTLN("[ZW101] Image OK");
-            p = zw101.image2Tz();
+            p = zw101.image2Tz(1);  // ✅ FIX: Tambahkan parameter slot 1 (sama seperti performance test)
             if (p == FINGERPRINT_OK)
             {
                 DEBUG_PRINTLN("[ZW101] Image converted");
@@ -1508,25 +1510,31 @@ String generateFingerprintHash(uint16_t fingerprintId, SensorType sensor)
 void updateSensorMetrics(SensorType sensor, bool success, unsigned long responseTime, float confidence)
 {
     SensorMetrics &metrics = sensorMetrics[sensor];
-    
+
     metrics.totalScans++;
-    if (success) {
+    if (success)
+    {
         metrics.successCount++;
         metrics.totalResponseTime += responseTime;
         metrics.scanCount++;
-        
+
         // Update average confidence (weighted average)
-        if (metrics.avgConfidence == 0) {
+        if (metrics.avgConfidence == 0)
+        {
             metrics.avgConfidence = confidence;
-        } else {
+        }
+        else
+        {
             metrics.avgConfidence = (metrics.avgConfidence * 0.7) + (confidence * 0.3);
         }
-    } else {
+    }
+    else
+    {
         metrics.failCount++;
     }
-    
+
     metrics.lastScanTime = millis();
-    
+
     DEBUG_PRINTF("[Metrics] %s - Total:%lu Success:%lu Fail:%lu AvgConf:%.1f%%\n",
                  getSensorName(sensor).c_str(),
                  metrics.totalScans,
@@ -1542,41 +1550,48 @@ void publishSensorMetrics()
 {
     if (!mqttClient.connected())
         return;
-    
+
     StaticJsonDocument<1024> doc;
-    
+
     // Create array for each sensor
-    for (int i = 0; i < SENSOR_COUNT; i++) {
+    for (int i = 0; i < SENSOR_COUNT; i++)
+    {
         JsonObject sensorObj = doc.createNestedObject(getSensorName((SensorType)i));
         SensorMetrics &metrics = sensorMetrics[i];
-        
+
         sensorObj["total_scans"] = metrics.totalScans;
         sensorObj["success_count"] = metrics.successCount;
         sensorObj["fail_count"] = metrics.failCount;
-        
+
         // Calculate average response time
-        if (metrics.scanCount > 0) {
+        if (metrics.scanCount > 0)
+        {
             sensorObj["avg_response_time"] = metrics.totalResponseTime / metrics.scanCount;
-        } else {
+        }
+        else
+        {
             sensorObj["avg_response_time"] = 0;
         }
-        
+
         sensorObj["avg_confidence"] = metrics.avgConfidence;
         sensorObj["last_scan_time"] = metrics.lastScanTime;
-        
+
         // Calculate success rate
-        if (metrics.totalScans > 0) {
+        if (metrics.totalScans > 0)
+        {
             float successRate = (float)metrics.successCount / metrics.totalScans * 100.0;
             sensorObj["success_rate"] = successRate;
-        } else {
+        }
+        else
+        {
             sensorObj["success_rate"] = 0;
         }
     }
-    
+
     String payload;
     serializeJson(doc, payload);
     mqttClient.publish(TOPIC_SENSOR_METRICS, payload.c_str());
-    
+
     DEBUG_PRINTLN("[Metrics] Published to MQTT");
 }
 

@@ -1434,7 +1434,6 @@ class AttendanceApp:
         metrics = [
             ("📦", "Kapasitas", f"capacity_label_{sensor_name}", "Storage capacity"),
             ("⚡", "Responsivitas", f"response_label_{sensor_name}", "Average response time"),
-            ("✓", "Tingkat Keberhasilan", f"success_label_{sensor_name}", "Success rate"),
             ("🎯", "Rata-rata Confidence", f"confidence_label_{sensor_name}", "Match confidence"),
             ("📊", "Total Scan", f"total_scans_label_{sensor_name}", "Total scans performed"),
             ("⏱️", "Update Terakhir", f"last_update_label_{sensor_name}", "Last activity")
@@ -1493,18 +1492,6 @@ class AttendanceApp:
         avg = sum(times) / len(times)
         return f"{avg:.2f} ms"
     
-    def calculate_success_rate(self, sensor_name):
-        """Calculate success rate for sensor"""
-        success = self.sensor_metrics[sensor_name]['success_count']
-        fail = self.sensor_metrics[sensor_name]['fail_count']
-        total = success + fail
-        
-        if total == 0:
-            return "N/A"
-        
-        rate = (success / total) * 100
-        return f"{rate:.1f}%"
-    
     def update_sensor_cards(self):
         """Update individual sensor card displays"""
         for sensor in ["FPM10A", "AS608", "ZW101"]:
@@ -1527,11 +1514,6 @@ class AttendanceApp:
             response_label = getattr(self, f"response_label_{sensor}", None)
             if response_label:
                 response_label.config(text=self.calculate_avg_response_time(sensor))
-            
-            # Update success rate
-            success_label = getattr(self, f"success_label_{sensor}", None)
-            if success_label:
-                success_label.config(text=self.calculate_success_rate(sensor))
             
             # Update confidence
             confidence_label = getattr(self, f"confidence_label_{sensor}", None)
